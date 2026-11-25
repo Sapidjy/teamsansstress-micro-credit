@@ -1,0 +1,146 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  MEMBER
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAWAL
+  INITIAL_DEPOSIT
+  SHARE
+  SHARE_REFUND
+  INITIAL_REFUND
+  DIVIDEND
+  LOAN_DISBURSEMENT
+  LOAN_REPAYMENT
+}
+
+enum CycleStatus {
+  OPEN
+  CLOSED
+}
+
+enum LoanStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  ACTIVE
+  PAID
+  LATE
+}
+
+model User {
+  id        String     @id @default(cuid())
+  name      String
+  phone     String     @unique
+  pinHash   String
+  role      Role       @default(MEMBER)
+  status    UserStatus @default(ACTIVE)
+  createdAt DateTime   @default(now())
+
+  account   Account?
+  loans     Loan[]
+  auditLogs AuditLog[]
+}
+
+model Account {
+  id           String        @id @default(cuid())
+  userId       String        @unique
+  balance      Decimal       @default(0) @db.Decimal(14, 2)
+  shares       Decimal       @default(0) @db.Decimal(14, 2)
+  user         User          @relation(fields: [userId], references: [id])
+  initialDeposit Decimal @default(0) @db.Decimal(14, 2)
+  transactions Transaction[]
+}
+
+model Transaction {
+  id          String          @id @default(cuid())
+  accountId   String
+  type        TransactionType
+  amount      Decimal         @db.Decimal(14, 2)
+  note        String?
+  weekOf      DateTime?       @db.Date
+  createdById String?
+  createdAt   DateTime        @default(now())
+  account     Account         @relation(fields: [accountId], references: [id])
+
+  @@unique([accountId, type, weekOf])
+  @@index([accountId, createdAt])
+}
+
+model Loan {
+  id           String        @id @default(cuid())
+  userId       String
+  amount       Decimal       @db.Decimal(14, 2)
+  interestRate Decimal       @db.Decimal(5, 2)
+  termDays     Int           @default(30)
+  reason       String?
+  status       LoanStatus    @default(PENDING)
+  approvedAt   DateTime?
+  dueDate      DateTime?
+  cycleId String?
+  cycle   Cycle?       @relation(fields: [cycleId], references: [id])
+  payout  LoanPayout?
+  createdAt    DateTime      @default(now())
+  user         User          @relation(fields: [userId], references: [id])
+  payments     LoanPayment[]
+
+  @@index([userId, status])
+}
+
+model Cycle {
+  id        String      @id @default(cuid())
+  name      String
+  startDate DateTime    @db.Date
+  endDate   DateTime    @db.Date
+  status    CycleStatus @default(OPEN)
+  teamFund  Decimal     @default(0) @db.Decimal(14, 2)
+  closedAt  DateTime?
+  createdAt DateTime    @default(now())
+  loans     Loan[]
+  payouts   LoanPayout[]
+}
+
+model LoanPayout {
+  id            String   @id @default(cuid())
+  loanId        String   @unique
+  cycleId       String
+  interest      Decimal  @db.Decimal(14, 2)
+  borrowerShare Decimal  @db.Decimal(14, 2)
+  teamShare     Decimal  @db.Decimal(14, 2)
+  poolShare     Decimal  @db.Decimal(14, 2)
+  createdAt     DateTime @default(now())
+  loan          Loan     @relation(fields: [loanId], references: [id])
+  cycle         Cycle    @relation(fields: [cycleId], references: [id])
+}
+
+model LoanPayment {
+  id        String   @id @default(cuid())
+  loanId    String
+  amount    Decimal  @db.Decimal(14, 2)
+  paidAt    DateTime @default(now())
+  loan      Loan     @relation(fields: [loanId], references: [id])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String
+  action    String
+  details   String?
+  createdAt DateTime @default(now())
+  actor     User     @relation(fields: [actorId], references: [id])
+}
