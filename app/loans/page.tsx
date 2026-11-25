@@ -1,4 +1,4 @@
-
+import {Suspense} from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -46,7 +46,7 @@ const statusIcons: Record<string, React.ElementType> = {
   REJECTED: XCircle,
 };
 
-export default async function LoanPage() {
+async function LoanContent() {
   const session = await getSession();
 
   if (!session) {
@@ -397,5 +397,13 @@ export default async function LoanPage() {
         )}
       </section>
     </main>
+  );
+}
+
+export default function LoanPage() {
+  return (
+    <Suspense fallback={<main className="mx-auto max-w-5xl px-4 py-10 text-sm text-muted-foreground">Chajman...</main>}>
+      <LoanContent />
+    </Suspense>
   );
 }
