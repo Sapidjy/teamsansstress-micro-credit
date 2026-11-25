@@ -128,7 +128,7 @@ async function LoanContent() {
       </div>
 
       {/* Résumé */}
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 grid-cols-2">
         <Card className="shadow-sm">
           <CardContent className="flex items-center gap-4 p-5">
             <div className="flex size-12 items-center justify-center rounded-xl bg-muted">
