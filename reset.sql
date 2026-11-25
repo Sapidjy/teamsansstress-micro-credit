@@ -1,0 +1,1 @@
+TRUNCATE TABLE "AuditLog", "LoanPayment", "LoanPayout", "Loan", "Transaction", "Cycle", "Account", "User" RESTART IDENTITY CASCADE;
