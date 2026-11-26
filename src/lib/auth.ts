@@ -8,7 +8,7 @@ export async function requireAdmin() {
 
   const user = await db.user.findUnique({ where: { id: session.userId } });
   if (!user || user.status !== "ACTIVE") redirect("/login");
-  if (user.role !== "ADMIN") redirect("/");
+  if (user.role !== "ADMIN") redirect("/group");
 
   return user;
 }
@@ -19,6 +19,6 @@ export async function requireUser() {
 
   const user = await db.user.findUnique({ where: { id: session.userId } });
   if (!user || user.status !== "ACTIVE") redirect("/login");
-
+  if (user.role === "TEAM") redirect("/");
   return user;
 }

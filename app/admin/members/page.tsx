@@ -16,6 +16,8 @@ import {
   UserRound,
   RefreshCw,
   UserPlus,
+  Numbers,
+  Hash,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -39,6 +41,7 @@ import {
 } from "@/components/ui/avatar";
 
 import { cn } from "@/lib/utils";
+import { nextMemberCode } from "@/lib/member-code";
 
 export const instant = false;
 
@@ -112,6 +115,8 @@ export default async function MembersPage() {
     0
   );
 
+  const nextCode = await nextMemberCode();
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -179,7 +184,7 @@ export default async function MembersPage() {
           </h2>
         </div>
 
-        <MemberForm />
+        <MemberForm nextCode={nextCode} />
       </section>
 
       {/* Members Table */}
@@ -205,6 +210,10 @@ export default async function MembersPage() {
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/40 hover:bg-muted/40">
+                  <TableHead className="min-w-[110px]">
+                    Kòd
+                  </TableHead>
+
                   <TableHead className="min-w-[200px]">
                     Manm
                   </TableHead>
@@ -231,7 +240,7 @@ export default async function MembersPage() {
                 {users.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={6}
+                      colSpan={7}
                       className="h-40 text-center"
                     >
                       <div className="flex flex-col items-center gap-2">
@@ -254,6 +263,19 @@ export default async function MembersPage() {
 
                     return (
                       <TableRow key={u.id}>
+                        {/* Kòd manm */}
+                        {/* Kòd manm */}
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className="gap-1.5 font-mono text-xs font-medium tabular-nums"
+                          >
+                            <Hash className="size-3 shrink-0 text-muted-foreground" />
+
+                            {u.code ?? "—"}
+                          </Badge>
+                        </TableCell>
+
                         {/* Manm */}
                         <TableCell>
                           <div className="flex items-center gap-3">

@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Image from "next/image";
+import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from "@/components/ui/input-group";
 
 export default function LoginPage() {
   const [state, action, pending] = useActionState(login, undefined);
@@ -48,19 +49,20 @@ export default function LoginPage() {
             <form action={action} className="space-y-5">
               <div className="space-y-2">
                 <Label htmlFor="phone">Nimewo telefòn</Label>
-                <div className="relative">
-                  <Phone className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
+                <InputGroup>
+                  <InputGroupAddon>
+                    <InputGroupText>+509</InputGroupText>
+                  </InputGroupAddon>
+                  <InputGroupInput
                     id="phone"
                     name="phone"
                     type="tel"
-                    inputMode="tel"
-                    autoComplete="tel"
+                    inputMode="numeric"
+                    autoComplete="tel-national"
+                    placeholder="XXXX XXXX"
                     required
-                    placeholder="509XXXXXXXX"
-                    className="h-12 pl-10"
                   />
-                </div>
+                </InputGroup>
               </div>
 
               <div className="space-y-2">

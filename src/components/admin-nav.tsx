@@ -30,7 +30,7 @@ import { cn } from "@/lib/utils";
 
 const links = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard, exact: true },
-  { href: "/", label: "Akèy", icon: Home, exact: true },
+  { href: "/group", label: "Akèy", icon: Home, exact: true },
   // { href: "/admin/members", label: "Manm", icon: Users },
   // { href: "/admin/shares", label: "Aksyon lendi", icon: PiggyBank },
   // { href: "/admin/loans", label: "Pre", icon: HandCoins },

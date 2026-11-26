@@ -13,6 +13,7 @@ import {
   CheckCircle2,
   AlertTriangle,
   Users,
+  Hash,
 } from "lucide-react";
 
 import { createMember } from "./actions";
@@ -30,7 +31,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 
-export default function MemberForm() {
+export default function MemberForm({ nextCode }: { nextCode: string }) {
   const [state, action, pending] = useActionState(
     createMember,
     undefined
@@ -81,6 +82,29 @@ export default function MemberForm() {
               </h3>
             </div>
 
+            {/* Kòd */}
+            <div className="space-y-2">
+              <Label htmlFor="code">Kòd (opsyonèl)</Label>
+
+              <div className="relative">
+                <Hash className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+
+                <Input
+                  id="code"
+                  name="code"
+                  type="text"
+                  placeholder={`Otomatik: ${nextCode}`}
+                  autoComplete="off"
+                  disabled={pending}
+                  className="h-11 pl-10 uppercase placeholder:normal-case"
+                />
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                Kite l vid pou sistèm nan bay <span className="font-mono">{nextCode}</span> otomatikman.
+              </p>
+            </div>
+
             {/* Non konplè */}
             <div className="space-y-2">
               <Label htmlFor="name">
@@ -105,28 +129,30 @@ export default function MemberForm() {
 
             {/* Telefòn */}
             <div className="space-y-2">
-              <Label htmlFor="phone">
-                Nimewo telefòn
-              </Label>
+              <Label htmlFor="phone">Nimewo telefòn</Label>
 
-              <div className="relative">
-                <Phone className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <div className="flex items-center gap-2">
+                <span className="flex h-11 items-center gap-1.5 rounded-md border bg-muted px-3 text-sm text-muted-foreground select-none">
+                  <Phone className="size-4" />
+                  +509
+                </span>
 
                 <Input
                   id="phone"
                   name="phone"
                   type="tel"
-                  inputMode="tel"
-                  placeholder="509XXXXXXXX"
-                  autoComplete="tel"
+                  inputMode="numeric"
+                  autoComplete="tel-national"
+                  placeholder="XXXX XXXX"
+                  maxLength={16}
                   required
                   disabled={pending}
-                  className="h-11 pl-10 tabular-nums"
+                  className="h-11"
                 />
               </div>
 
               <p className="text-xs text-muted-foreground">
-                Antre nimewo telefòn manm nan ak kòd peyi a.
+                Antre sèlman 8 chif yo, san +509 (egzanp: 4114 9129).
               </p>
             </div>
           </div>

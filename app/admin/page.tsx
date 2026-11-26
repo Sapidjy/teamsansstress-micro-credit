@@ -143,7 +143,7 @@ export default async function AdminDashboard() {
     logs,
   ] = await Promise.all([
     db.user.count({ where: { status: "ACTIVE" } }),
-    db.user.count({ where: { status: "INACTIVE" } }),
+    db.user.count({ where: { status: "INACTIVE", role: { not: "TEAM" } } }),
     db.account.aggregate({ _sum: { balance: true, shares: true, initialDeposit: true } }),
     db.loan.groupBy({ by: ["status"], _count: { _all: true } }),
     db.cycle.findFirst({ where: { status: "OPEN" }, include: { payouts: true } }),
