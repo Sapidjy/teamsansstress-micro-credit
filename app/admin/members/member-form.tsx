@@ -97,7 +97,6 @@ export default function MemberForm({ nextCode }: { nextCode: string }) {
                   autoComplete="off"
                   disabled={pending}
                   className="h-11 pl-10 uppercase placeholder:normal-case"
-                  hidden
                   readOnly
                 />
               </div>
