@@ -3,13 +3,18 @@
 import { useActionState } from "react";
 import { Check, Loader2, X } from "lucide-react";
 
-import { approveLoan, rejectLoan, type DecisionState } from "./actions";
+import { approveLoan, rejectLoan } from "./actions";
 import { Button } from "@/components/ui/button";
 
-async function decide(prev: DecisionState, formData: FormData): Promise<DecisionState> {
-  return formData.get("intent") === "reject"
-    ? rejectLoan(prev, formData)
-    : approveLoan(prev, formData);
+type DecisionState = { error?: string } | undefined;
+
+async function decide(_prev: DecisionState, formData: FormData): Promise<DecisionState> {
+  if (formData.get("intent") === "reject") {
+    await rejectLoan(formData);
+  } else {
+    await approveLoan(formData);
+  }
+  return undefined;
 }
 
 export function LoanActions({ id }: { id: string }) {
