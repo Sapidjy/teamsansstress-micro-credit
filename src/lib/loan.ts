@@ -13,7 +13,7 @@ export const LOAN_TERMS = {
 export type TermDays = keyof typeof LOAN_TERMS;
 
 // Dire manm nan ka chwazi lè l mande yon pre (8 jou sèlman pa renouvèlman)
-export const REQUEST_TERMS: number[] = [15, 30, 60];
+export const REQUEST_TERMS: readonly TermDays[] = [15, 30, 60];
 
 // Dire pre a pran lè l renouvle
 export const RENEWAL_NEXT: Record<number, number> = { 60: 30, 30: 15, 15: 8, 8: 8 };
