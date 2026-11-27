@@ -105,7 +105,9 @@ export default async function SharesPage() {
   const users = await db.user.findMany({
     where: {
       status: "ACTIVE",
-      role: "MEMBER",
+      role: {
+        not: "TEAM",
+      },
     },
     orderBy: {
       name: "asc",
