@@ -80,7 +80,7 @@ export default function ShareForm({
 
       <button
         disabled={pending}
-        className="bg-blue-600 text-white rounded-lg p-2 font-semibold disabled:opacity-50 sm:col-span-5"
+        className="p-2 font-semibold disabled:opacity-50 sm:col-span-5"
       >
         {pending ? "Ap anrejistre..." : "Anrejistre aksyon an"}
       </button>
