@@ -6,6 +6,7 @@ import {
   CalendarClock,
   CheckCircle2,
   Clock,
+  Coins,
   HandCoins,
   Landmark,
   Lock,
@@ -36,6 +37,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { loanDue } from "@/lib/loan-calc";
 
 export const instant = false;
 
@@ -141,10 +143,14 @@ export default async function AdminDashboard() {
     paidSharesThisWeek,
     activeAccounts,
     logs,
+    team,
   ] = await Promise.all([
     db.user.count({ where: { status: "ACTIVE" } }),
     db.user.count({ where: { status: "INACTIVE", role: { not: "TEAM" } } }),
-    db.account.aggregate({ _sum: { balance: true, shares: true, initialDeposit: true } }),
+    db.account.aggregate({
+      where: { user: { role: "MEMBER" } },
+      _sum: { balance: true, shares: true, initialDeposit: true },
+    }),
     db.loan.groupBy({ by: ["status"], _count: { _all: true } }),
     db.cycle.findFirst({ where: { status: "OPEN" }, include: { payouts: true } }),
     db.loan.findMany({
@@ -162,6 +168,7 @@ export default async function AdminDashboard() {
       take: 10,
       include: { actor: { select: { name: true } } },
     }),
+    db.user.findFirst({ where: { role: "TEAM" }, include: { account: true } }),
   ]);
 
   const count = (s: string) => loanGroups.find((g) => g.status === s)?._count._all ?? 0;
@@ -183,10 +190,8 @@ export default async function AdminDashboard() {
   }[] = [];
 
   for (const l of openLoans) {
-    const total = toCents(l.amount) + interestCents(l.amount, l.interestRate);
-    const paid = l.payments.reduce((s, p) => s + toCents(p.amount), ZERO);
-    const remaining = total - paid;
-    outstanding += remaining;
+    const due = loanDue(l, l.payments);
+    outstanding += due.remaining;
     principal += Number(l.amount);
 
     if (l.status === "LATE" && l.dueDate) {
@@ -196,7 +201,7 @@ export default async function AdminDashboard() {
         phone: l.user.phone,
         dueDate: l.dueDate,
         daysLate: Math.max(Math.floor((Date.now() - l.dueDate.getTime()) / DAY), 0),
-        remaining: fromCents(remaining),
+        remaining: fromCents(due.remaining),
       });
     }
   }
@@ -209,7 +214,7 @@ export default async function AdminDashboard() {
     0
   );
 
-  const total = balance + shares + initial;
+  const total = balance + shares + initial + Number(team?.account?.balance ?? 0);
 
   return (
     <div className="space-y-8">
@@ -340,6 +345,23 @@ export default async function AdminDashboard() {
           />
           <StatCard label="Pre peye nèt" value={String(count("PAID"))} icon={CheckCircle2} />
           <StatCard label="Pre rejte" value={String(count("REJECTED"))} icon={XCircle} />
+        </div>
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <StatCard
+            label="Toujou dwe"
+            value={`${fmt(fromCents(outstanding))} HTG`}
+            sub="Kapital + enterè, apre peman"
+            icon={Wallet}
+          />
+          <StatCard label="Pre peye nèt" value={String(count("PAID"))} icon={CheckCircle2} />
+          <StatCard label="Pre rejte" value={String(count("REJECTED"))} icon={XCircle} />
+          <StatCard
+            label="Kès ekip la (TSS-MK)"
+            value={`${fmt(Number(team?.account?.balance ?? 0))} HTG`}
+            sub="Frè, penalite ak 25% enterè"
+            icon={Coins}
+            href="/admin/fees"
+          />
         </div>
       </section>
 

@@ -7,7 +7,7 @@ const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
 const db = new PrismaClient({ adapter });
 
 // ⚠️ Chanje 3 valè sa yo anvan w kouri script la
-const NAME = "SAPIDJY";
+const NAME = "Vixamar Sadeley";
 const PHONE = "50941149129";
 const PIN = "210802";
 

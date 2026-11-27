@@ -1,4 +1,4 @@
-import {Suspense} from "react";
+import { Suspense } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   Clock3,
   HandCoins,
+  RefreshCw,
   Wallet,
   XCircle,
 } from "lucide-react";
@@ -22,7 +23,9 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { getSession } from "@/lib/session";
 import { db } from "@/lib/db";
-import { loanStatusLabels, maxLoan } from "@/lib/loan";
+import { LOAN_TERMS, loanStatusLabels, maxLoan, type TermDays } from "@/lib/loan";
+import { loanDue } from "@/lib/loan-calc";
+import { fromCents } from "@/lib/cycle";
 import LoanForm from "@app/admin/loans/loan-form";
 
 const fmt = (value: number) =>
@@ -30,12 +33,16 @@ const fmt = (value: number) =>
     maximumFractionDigits: 2,
   });
 
+const termLabel = (days: number) =>
+  LOAN_TERMS[days as TermDays]?.label ?? `${days} jou`;
+
 const statusStyles: Record<string, string> = {
   PENDING: "bg-amber-100 text-amber-800 border-amber-200",
   ACTIVE: "bg-blue-100 text-blue-800 border-blue-200",
   LATE: "bg-red-100 text-red-800 border-red-200",
   PAID: "bg-green-100 text-green-800 border-green-200",
   REJECTED: "bg-muted text-muted-foreground border-border",
+  RENEWED: "bg-gray-100 text-gray-700 border-gray-200",
 };
 
 const statusIcons: Record<string, React.ElementType> = {
@@ -44,6 +51,7 @@ const statusIcons: Record<string, React.ElementType> = {
   LATE: XCircle,
   PAID: CheckCircle2,
   REJECTED: XCircle,
+  RENEWED: RefreshCw,
 };
 
 async function LoanContent() {
@@ -87,6 +95,11 @@ async function LoanContent() {
 
   const canRequestLoan = !currentLoan;
 
+  const currentDue =
+    currentLoan && (currentLoan.status === "ACTIVE" || currentLoan.status === "LATE")
+      ? loanDue(currentLoan, currentLoan.payments)
+      : null;
+
   return (
     <main className="mx-auto w-full max-w-5xl space-y-8 px-4 py-6 sm:px-6 lg:py-10">
       {/* Header */}
@@ -97,7 +110,7 @@ async function LoanContent() {
           size="sm"
           className="-ml-2 gap-2 text-muted-foreground"
         >
-          <Link href="/">
+          <Link href="/dashboard">
             <ArrowLeft className="size-4" />
             Retounen
           </Link>
@@ -128,7 +141,7 @@ async function LoanContent() {
       </div>
 
       {/* Résumé */}
-      <div className="grid gap-4 grid-cols-2">
+      <div className="grid grid-cols-2 gap-4">
         <Card className="shadow-sm">
           <CardContent className="flex items-center gap-4 p-5">
             <div className="flex size-12 items-center justify-center rounded-xl bg-muted">
@@ -136,9 +149,7 @@ async function LoanContent() {
             </div>
 
             <div className="min-w-0">
-              <p className="text-sm text-muted-foreground">
-                Aksyon ou
-              </p>
+              <p className="text-sm text-muted-foreground">Aksyon ou</p>
               <p className="text-xl font-bold tabular-nums">
                 {fmt(shares)}{" "}
                 <span className="text-xs font-medium text-muted-foreground">
@@ -160,8 +171,7 @@ async function LoanContent() {
                 Maksimòm ou ka mande
               </p>
               <p className="text-xl font-bold tabular-nums text-primary">
-                {fmt(maxAmount)}{" "}
-                <span className="text-xs font-medium">HTG</span>
+                {fmt(maxAmount)} <span className="text-xs font-medium">HTG</span>
               </p>
               <p className="text-xs text-muted-foreground">
                 2 fwa kantite aksyon ou
@@ -184,29 +194,100 @@ async function LoanContent() {
           <CardContent className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p className="text-sm text-muted-foreground">
-                  Montan prè
-                </p>
+                <p className="text-sm text-muted-foreground">Montan prè</p>
                 <p className="text-2xl font-bold tabular-nums">
                   {fmt(Number(currentLoan.amount))} HTG
                 </p>
               </div>
 
-              <Badge
-                variant="outline"
-                className={statusStyles[currentLoan.status]}
-              >
-                {loanStatusLabels[currentLoan.status]}
-              </Badge>
+              <div className="flex flex-col items-end gap-1">
+                <Badge
+                  variant="outline"
+                  className={statusStyles[currentLoan.status]}
+                >
+                  {loanStatusLabels[currentLoan.status]}
+                </Badge>
+                {currentLoan.renewalCount > 0 && (
+                  <Badge variant="outline" className="text-[10px]">
+                    Renouvèlman {currentLoan.renewalCount}/2
+                  </Badge>
+                )}
+              </div>
             </div>
 
             <Separator />
 
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <CalendarDays className="size-4" />
-              Dat demann:{" "}
-              {currentLoan.createdAt.toLocaleDateString("fr-FR")}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+              <span className="flex items-center gap-2">
+                <CalendarDays className="size-4" />
+                Dat demann: {currentLoan.createdAt.toLocaleDateString("fr-FR")}
+              </span>
+              <span>
+                {termLabel(currentLoan.termDays)} · {Number(currentLoan.interestRate)}%
+              </span>
             </div>
+
+            {/* Detay lajan an (pre aktif oswa an reta) */}
+            {currentDue && (
+              <div className="space-y-3 rounded-lg border p-3">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Kapital</p>
+                    <p className="font-semibold tabular-nums">
+                      {fmt(fromCents(currentDue.principal))} HTG
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Enterè</p>
+                    <p className="font-semibold tabular-nums">
+                      {fmt(fromCents(currentDue.interest))} HTG
+                    </p>
+                  </div>
+                  {currentDue.weeks > 0 && (
+                    <div>
+                      <p className="text-xs text-destructive">
+                        Penalite ({currentDue.weeks} lendi an reta)
+                      </p>
+                      <p className="font-semibold tabular-nums text-destructive">
+                        {fmt(fromCents(currentDue.penalty))} HTG
+                      </p>
+                    </div>
+                  )}
+                  <div>
+                    <p className="text-xs text-muted-foreground">
+                      Total pou remèt
+                    </p>
+                    <p className="font-semibold tabular-nums">
+                      {fmt(fromCents(currentDue.total))} HTG
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Deja peye</p>
+                    <p className="font-semibold tabular-nums">
+                      {fmt(fromCents(currentDue.paid))} HTG
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Rete</p>
+                    <p className="font-semibold tabular-nums text-primary">
+                      {fmt(fromCents(currentDue.remaining))} HTG
+                    </p>
+                  </div>
+                </div>
+
+                {currentLoan.dueDate && (
+                  <p className="text-sm">
+                    Dat limit:{" "}
+                    <b>{currentLoan.dueDate.toLocaleDateString("fr-FR")}</b>
+                  </p>
+                )}
+
+                <p className="text-xs text-muted-foreground">
+                  Si w peye pre a an plizyè fwa, chak vèsman koute 25 HTG. Chak
+                  lendi apre dat limit la, enterè a ajoute ankò kòm penalite.
+                </p>
+              </div>
+            )}
 
             {currentLoan.reason && (
               <div className="rounded-lg bg-muted/60 p-3">
@@ -221,8 +302,8 @@ async function LoanContent() {
               {currentLoan.status === "PENDING"
                 ? "Demann ou an ap tann administratè a trete li."
                 : currentLoan.status === "ACTIVE"
-                  ? "Prè ou a aktif. Kontakte administrasyon an pou enfòmasyon sou remboursman."
-                  : "Prè ou a an reta. Tanpri kontakte administrasyon an."}
+                  ? "Prè ou a aktif. Kontakte administrasyon an pou peye oswa renouvle l."
+                  : "Prè ou a an reta, kidonk penalite a ap monte chak lendi. Tanpri kontakte administrasyon an."}
             </p>
           </CardContent>
         </Card>
@@ -230,10 +311,7 @@ async function LoanContent() {
 
       {/* Fòm demann */}
       {canRequestLoan ? (
-        <LoanForm
-          shares={shares}
-          maxAmount={maxAmount}
-        />
+        <LoanForm shares={shares} maxAmount={maxAmount} />
       ) : (
         <Card className="border-dashed shadow-none">
           <CardContent className="flex flex-col items-center gap-3 py-8 text-center">
@@ -246,8 +324,8 @@ async function LoanContent() {
                 Ou pa ka fè yon lòt demann pou kounye a
               </p>
               <p className="max-w-md text-sm text-muted-foreground">
-                Ou dwe tann demann aktyèl ou a jwenn yon desizyon
-                oswa prè ou a fin regle anvan ou fè yon lòt demann.
+                Ou dwe tann demann aktyèl ou a jwenn yon desizyon oswa prè ou a
+                fin regle anvan ou fè yon lòt demann.
               </p>
             </div>
           </CardContent>
@@ -258,17 +336,13 @@ async function LoanContent() {
       <section className="space-y-4">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-bold">
-              Istwa prè mwen yo
-            </h2>
+            <h2 className="text-lg font-bold">Istwa prè mwen yo</h2>
             <p className="text-sm text-muted-foreground">
               Tout demann prè ou te fè yo.
             </p>
           </div>
 
-          <Badge variant="outline">
-            {user.loans.length} demann
-          </Badge>
+          <Badge variant="outline">{user.loans.length} demann</Badge>
         </div>
 
         {user.loans.length === 0 ? (
@@ -278,9 +352,7 @@ async function LoanContent() {
                 <HandCoins className="size-5 text-muted-foreground" />
               </div>
 
-              <p className="font-medium">
-                Ou poko fè okenn demann prè
-              </p>
+              <p className="font-medium">Ou poko fè okenn demann prè</p>
 
               <p className="text-sm text-muted-foreground">
                 Lè ou fè premye demann ou an, l ap parèt isit la.
@@ -292,17 +364,14 @@ async function LoanContent() {
             {user.loans.map((loan) => {
               const Icon = statusIcons[loan.status] ?? Clock3;
 
-              const interest =
-                Number(loan.amount) *
-                (Number(loan.interestRate) / 100);
+              const due = loanDue(loan, loan.payments);
+              const open = loan.status === "ACTIVE" || loan.status === "LATE";
 
-              const total =
-                Number(loan.amount) + interest;
-
-              const paid = loan.payments.reduce(
-                (sum, payment) => sum + Number(payment.amount),
-                0
-              );
+              const interest = fromCents(due.interest);
+              const penalty = fromCents(due.penalty);
+              const total = fromCents(due.total);
+              const paid = fromCents(due.paid);
+              const remaining = fromCents(due.remaining);
 
               return (
                 <Card key={loan.id} className="shadow-sm">
@@ -318,30 +387,46 @@ async function LoanContent() {
                             {fmt(Number(loan.amount))} HTG
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            {loan.termDays} jou
+                            {termLabel(loan.termDays)} · {Number(loan.interestRate)}%
                           </p>
                         </div>
                       </div>
 
-                      <Badge
-                        variant="outline"
-                        className={statusStyles[loan.status]}
-                      >
-                        {loanStatusLabels[loan.status]}
-                      </Badge>
+                      <div className="flex flex-col items-end gap-1">
+                        <Badge
+                          variant="outline"
+                          className={statusStyles[loan.status]}
+                        >
+                          {loanStatusLabels[loan.status]}
+                        </Badge>
+                        {loan.renewalCount > 0 && (
+                          <Badge variant="outline" className="text-[10px]">
+                            Renouvèlman {loan.renewalCount}/2
+                          </Badge>
+                        )}
+                      </div>
                     </div>
 
                     <Separator />
 
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                       <div>
-                        <p className="text-xs text-muted-foreground">
-                          Enterè
-                        </p>
+                        <p className="text-xs text-muted-foreground">Enterè</p>
                         <p className="font-semibold tabular-nums">
                           {fmt(interest)} HTG
                         </p>
                       </div>
+
+                      {due.weeks > 0 && (
+                        <div>
+                          <p className="text-xs text-destructive">
+                            Penalite ({due.weeks} lendi)
+                          </p>
+                          <p className="font-semibold tabular-nums text-destructive">
+                            {fmt(penalty)} HTG
+                          </p>
+                        </div>
+                      )}
 
                       <div>
                         <p className="text-xs text-muted-foreground">
@@ -368,12 +453,14 @@ async function LoanContent() {
                       </p>
                     )}
 
-                    {loan.status === "ACTIVE" || loan.status === "LATE" ? (
+                    {open && (
                       <div className="space-y-1">
                         <div className="flex justify-between text-xs text-muted-foreground">
-                          <span>Deja peye</span>
-                          <span className="tabular-nums">
-                            {fmt(paid)} HTG
+                          <span>
+                            Deja peye: <b className="tabular-nums">{fmt(paid)} HTG</b>
+                          </span>
+                          <span>
+                            Rete: <b className="tabular-nums">{fmt(remaining)} HTG</b>
                           </span>
                         </div>
                         <div className="h-2 overflow-hidden rounded-full bg-muted">
@@ -387,8 +474,25 @@ async function LoanContent() {
                             }}
                           />
                         </div>
+                        {loan.dueDate && (
+                          <p className="pt-1 text-xs text-muted-foreground">
+                            Dat limit: {loan.dueDate.toLocaleDateString("fr-FR")}
+                          </p>
+                        )}
                       </div>
-                    ) : null}
+                    )}
+
+                    {loan.status === "RENEWED" && (
+                      <p className="text-sm text-muted-foreground">
+                        Enterè peye. Pre a renouvle.
+                      </p>
+                    )}
+
+                    {loan.status === "PAID" && (
+                      <p className="text-sm font-medium text-green-600">
+                        Pre a peye nèt.
+                      </p>
+                    )}
                   </CardContent>
                 </Card>
               );
@@ -402,7 +506,13 @@ async function LoanContent() {
 
 export default function LoanPage() {
   return (
-    <Suspense fallback={<main className="mx-auto max-w-5xl px-4 py-10 text-sm text-muted-foreground">Chajman...</main>}>
+    <Suspense
+      fallback={
+        <main className="mx-auto max-w-5xl px-4 py-10 text-sm text-muted-foreground">
+          Chajman...
+        </main>
+      }
+    >
       <LoanContent />
     </Suspense>
   );

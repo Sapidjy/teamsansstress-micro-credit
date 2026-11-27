@@ -25,7 +25,7 @@ export default function LoginPage() {
         <div className="relative mx-auto flex max-w-sm flex-col items-center gap-3 text-center">
           <div className="flex h-37 w-37 items-center justify-center rounded-full bg-white shadow-xl shadow-primary/50 ring-1 ring-white/10">
             {/* <Landmark className="h-7 w-7 text-primary-foreground" /> */}
-            <Image src={"/logo_tss.png"} alt="Logo TSS" width={170} height={170} className="absolute" />
+            <Image src={"/logo_tss.png"} alt="Logo TSS" width={170} height={170} className="absolute" loading="eager" />
           </div>
           <h1 className="text-2xl font-bold tracking-tight">Byenvini nan Team Sans Stress Micro-Crédit</h1>
           <p className="text-sm text-white/70">

@@ -22,3 +22,17 @@ export function addDays(d: Date, n: number): Date {
 }
 
 export const iso = (d: Date) => d.toISOString().slice(0, 10);
+
+const MONTHS = ["Jan", "Fev", "Mas", "Avr", "Me", "Jen", "Jiy", "Out", "Sep", "Okt", "Nov", "Des"];
+
+function ordinal(n: number) {
+  return n === 1 ? "1e" : `${n}yèm`;
+}
+
+// Memo aksyon lendi: "Aksyon 2yèm lendi - 8 Jen 26"
+export function shareNote(monday: Date): string {
+  const day = monday.getUTCDate();
+  const nth = Math.floor((day - 1) / 7) + 1;
+  const yy = String(monday.getUTCFullYear()).slice(-2);
+  return `Aksyon ${ordinal(nth)} lendi - ${day} ${MONTHS[monday.getUTCMonth()]} ${yy}`;
+}

@@ -1,10 +1,10 @@
-
 "use client";
 
-import { useActionState, useEffect, useRef } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { createTransaction } from "./actions";
 
 import {
+  AlertCircle,
   ArrowDownToLine,
   ArrowUpFromLine,
   CheckCircle2,
@@ -14,8 +14,8 @@ import {
   LockKeyhole,
   ReceiptText,
   UserRound,
+  Users,
   Wallet,
-  AlertCircle,
 } from "lucide-react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -41,27 +41,39 @@ import { Separator } from "@/components/ui/separator";
 
 type Member = {
   id: string;
+  code: string | null;
   name: string;
-  phone: string;
+  isTeam: boolean;
 };
 
-export default function TransactionForm({
-  members,
-}: {
-  members: Member[];
-}) {
-  const [state, action, pending] = useActionState(
-    createTransaction,
-    undefined
-  );
+export default function TransactionForm({ members }: { members: Member[] }) {
+  const [state, action, pending] = useActionState(createTransaction, undefined);
 
   const ref = useRef<HTMLFormElement>(null);
+  const [userId, setUserId] = useState("");
+  const [type, setType] = useState("DEPOSIT");
+
+  const selected = members.find((m) => m.id === userId);
+  const isTeam = selected?.isTeam ?? false;
+  const activeCount = members.filter((m) => !m.isTeam).length;
 
   useEffect(() => {
     if (state?.success) {
       ref.current?.reset();
+      setUserId("");
+      setType("DEPOSIT");
     }
   }, [state]);
+
+  function onUserChange(id: string) {
+    setUserId(id);
+    const m = members.find((x) => x.id === id);
+    if (m?.isTeam) {
+      setType("INITIAL_DEPOSIT"); // kont ekip la: sèlman depo inisyal
+    } else if (isTeam) {
+      setType("DEPOSIT"); // nou kite kont ekip la, retounen sou default la
+    }
+  }
 
   return (
     <Card className="overflow-hidden shadow-sm">
@@ -74,9 +86,7 @@ export default function TransactionForm({
             </div>
 
             <div className="space-y-1">
-              <CardTitle className="text-base">
-                Nouvo tranzaksyon
-              </CardTitle>
+              <CardTitle className="text-base">Nouvo tranzaksyon</CardTitle>
 
               <CardDescription className="text-xs">
                 Anrejistre yon depo oswa yon retrè sou kont yon manm.
@@ -86,7 +96,7 @@ export default function TransactionForm({
 
           <Badge variant="secondary" className="w-fit gap-1.5">
             <UserRound className="size-3.5" />
-            {members.length} manm aktif
+            {activeCount} manm aktif
           </Badge>
         </div>
       </CardHeader>
@@ -99,23 +109,17 @@ export default function TransactionForm({
           </div>
 
           <div className="space-y-1">
-            <p className="text-sm font-semibold">
-              Enfòmasyon sou operasyon an
-            </p>
+            <p className="text-sm font-semibold">Enfòmasyon sou operasyon an</p>
 
             <p className="text-xs leading-relaxed text-muted-foreground">
-              Verifye manm nan, kalite tranzaksyon an ak montan an
-              anvan ou valide operasyon an.
+              Verifye manm nan, kalite tranzaksyon an ak montan an anvan ou
+              valide operasyon an.
             </p>
           </div>
         </div>
 
         {/* Form */}
-        <form
-          ref={ref}
-          action={action}
-          className="space-y-5"
-        >
+        <form ref={ref} action={action} className="space-y-5">
           <div className="grid gap-4 md:grid-cols-2">
             {/* Member */}
             <div className="space-y-2">
@@ -124,25 +128,28 @@ export default function TransactionForm({
                 <span className="ml-1 text-destructive">*</span>
               </Label>
 
-              <Select name="userId" required>
+              <Select
+                name="userId"
+                value={userId}
+                onValueChange={onUserChange}
+                required
+                disabled={pending}
+              >
                 <SelectTrigger id="userId" className="h-10 w-full">
                   <SelectValue placeholder="Chwazi yon manm..." />
                 </SelectTrigger>
 
                 <SelectContent>
                   {members.map((member) => (
-                    <SelectItem
-                      key={member.id}
-                      value={member.id}
-                    >
-                      <div className="flex flex-col gap-0.5">
-                        <span className="font-medium">
-                          {member.name}
-                        </span>
-
-                        <span className="text-xs text-muted-foreground">
-                          {member.phone}
-                        </span>
+                    <SelectItem key={member.id} value={member.id}>
+                      <div className="flex items-center gap-2">
+                        {member.code && (
+                          <span className="font-mono text-xs text-muted-foreground">
+                            {member.code}
+                          </span>
+                        )}
+                        <span className="font-medium">{member.name}</span>
+                        {member.isTeam && <Users className="size-3.5 text-primary" />}
                       </div>
                     </SelectItem>
                   ))}
@@ -161,13 +168,19 @@ export default function TransactionForm({
                 <span className="ml-1 text-destructive">*</span>
               </Label>
 
-              <Select name="type" defaultValue="DEPOSIT" required>
+              <Select
+                name="type"
+                value={type}
+                onValueChange={setType}
+                required
+                disabled={pending}
+              >
                 <SelectTrigger id="type" className="h-10 w-full">
                   <SelectValue placeholder="Chwazi yon kalite..." />
                 </SelectTrigger>
 
                 <SelectContent>
-                  <SelectItem value="DEPOSIT">
+                  <SelectItem value="DEPOSIT" disabled={isTeam}>
                     <div className="flex items-center gap-2">
                       <ArrowDownToLine className="size-4 text-green-600" />
                       Depo
@@ -181,7 +194,7 @@ export default function TransactionForm({
                     </div>
                   </SelectItem>
 
-                  <SelectItem value="WITHDRAWAL">
+                  <SelectItem value="WITHDRAWAL" disabled={isTeam}>
                     <div className="flex items-center gap-2">
                       <ArrowUpFromLine className="size-4 text-red-600" />
                       Retrè
@@ -191,7 +204,9 @@ export default function TransactionForm({
               </Select>
 
               <p className="text-[11px] text-muted-foreground">
-                Chwazi operasyon finansye ou vle anrejistre a.
+                {isTeam
+                  ? "Kont ekip la ka resevwa sèlman depo inisyal."
+                  : "Chwazi operasyon finansye ou vle anrejistre a."}
               </p>
             </div>
 
@@ -214,6 +229,7 @@ export default function TransactionForm({
                   step="0.01"
                   placeholder="Antre montan an"
                   required
+                  disabled={pending}
                   className="h-10 pl-9"
                 />
               </div>
@@ -240,6 +256,7 @@ export default function TransactionForm({
                   name="note"
                   placeholder="Ajoute yon detay..."
                   maxLength={200}
+                  disabled={pending}
                   className="h-10 pl-9"
                 />
               </div>
@@ -254,12 +271,10 @@ export default function TransactionForm({
 
           {/* Feedback */}
           {state?.error && (
-            <Alert variant="destructive">
+            <Alert variant="destructive" role="alert">
               <AlertCircle className="size-4" />
 
-              <AlertDescription>
-                {state.error}
-              </AlertDescription>
+              <AlertDescription>{state.error}</AlertDescription>
             </Alert>
           )}
 

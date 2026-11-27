@@ -331,7 +331,7 @@ export default async function DashboardPage() {
 
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-semibold">
-                          {txLabels[t.type]}
+                          {t.note ?? txLabels[t.type]}
                         </p>
                         <p className="text-xs text-muted-foreground">
                           {t.createdAt.toLocaleDateString("fr-FR")}

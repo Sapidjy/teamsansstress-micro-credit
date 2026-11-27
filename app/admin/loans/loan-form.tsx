@@ -12,7 +12,7 @@ import {
   Percent,
 } from "lucide-react";
 
-import { LOAN_TERMS, MIN_LOAN, calcLoan, type TermDays } from "../../../src/lib/loan";
+import { LOAN_TERMS, MIN_LOAN, REQUEST_TERMS, calcLoan, type TermDays } from "../../../src/lib/loan";
 import { requestLoan } from "./actions";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -102,7 +102,7 @@ export default function LoanForm({
           <div className="space-y-2">
             <Label>Dire</Label>
             <div className="grid grid-cols-3 gap-2">
-              {(Object.entries(LOAN_TERMS) as [string, (typeof LOAN_TERMS)[TermDays]][]).map(
+              {(Object.entries(LOAN_TERMS).filter(([d]) => REQUEST_TERMS.includes(Number(d))) as [string, (typeof LOAN_TERMS)[TermDays]][]).map(
                 ([days, t]) => {
                   const selected = term === Number(days);
                   return (

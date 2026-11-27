@@ -5,32 +5,32 @@ import { db } from "../../../src/lib/db";
 import { requireAdmin } from "../../../src/lib/auth";
 import { computeSettlement, fromCents, money, ZERO } from "../../../src/lib/cycle";
 
-class AppError extends Error {}
+class AppError extends Error { }
 
 type Client = Pick<typeof db, "cycle" | "loan" | "loanPayout" | "account">;
 
 export type SettlementPreview =
   | { error: string }
   | {
-      cycleName: string;
-      totals: {
-        interest: number;
-        team: number;
-        pool: number;
-        remainder: number;
-        weight: number;
-      };
-      rows: {
-        id: string;
-        name: string;
-        phone: string;
-        shares: number;
-        initial: number;
-        borrowerShare: number;
-        poolShare: number;
-        total: number;
-      }[];
+    cycleName: string;
+    totals: {
+      interest: number;
+      team: number;
+      pool: number;
+      remainder: number;
+      weight: number;
     };
+    rows: {
+      id: string;
+      name: string;
+      phone: string;
+      shares: number;
+      initial: number;
+      borrowerShare: number;
+      poolShare: number;
+      total: number;
+    }[];
+  };
 
 async function loadData(client: Client) {
   const cycle = await client.cycle.findFirst({ where: { status: "OPEN" } });
@@ -184,6 +184,30 @@ export async function confirmSettlement(): Promise<{ error?: string; success?: b
           await tx.transaction.createMany({ data: entries });
         }
 
+        if (r.remainder > ZERO) {
+          const team = await tx.user.findFirst({
+            where: { role: "TEAM" },
+            include: { account: true },
+          });
+          if (!team?.account) throw new AppError("Kont ekip la (TSS-MK) pa egziste.");
+
+          await tx.account.update({
+            where: { id: team.account.id },
+            data: { balance: { increment: money(r.remainder) } },
+          });
+          await tx.transaction.create({
+            data: {
+              accountId: team.account.id,
+              type: "TEAM_INCOME",
+              feeKind: "LOAN_INTEREST",
+              amount: money(r.remainder),
+              note: `Rès santim dekesman ${data.cycle.name}`,
+              createdById: admin.id,
+            },
+          });
+        }
+
+        // teamFund = sèlman yon rapò: sa ekip la te resevwa nan sik la
         await tx.cycle.update({
           where: { id: data.cycle.id },
           data: { teamFund: money(r.teamTotal + r.remainder) },

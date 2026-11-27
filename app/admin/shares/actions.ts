@@ -2,26 +2,29 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { db } from "../../../src/lib/db";
-import { requireAdmin } from "../../../src/lib/auth";
-import { SHARE_AMOUNT } from "../../../src/lib/loan";
-import { addDays, mondayOf, todayHT } from "../../../src/lib/week";
-
+import { db } from "@/lib/db";
+import { requireAdmin } from "@/lib/auth";
+import { SHARE_MAX, SHARE_MIN } from "@/lib/loan";
+import { addDays, mondayOf, shareNote, todayHT } from "@/lib/week";
 type State = { error?: string; success?: boolean } | undefined;
 
-class AppError extends Error {}
+class AppError extends Error { }
+
+const amountRule = z.coerce.number().int().min(SHARE_MIN).max(SHARE_MAX);
 
 const schema = z.object({
   userId: z.string().min(1),
   weekOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   weeks: z.coerce.number().int().min(1).max(12),
+  amount: amountRule,
 });
 
 async function applyShares(
   adminId: string,
   userId: string,
   firstMonday: Date,
-  weeks: number
+  weeks: number,
+  amount: number
 ) {
   if (mondayOf(firstMonday).getTime() !== firstMonday.getTime()) {
     throw new AppError("Dat la dwe se yon lendi.");
@@ -38,15 +41,17 @@ async function applyShares(
     });
     if (!account) throw new AppError("Kont lan pa egziste.");
     if (account.user.status !== "ACTIVE") throw new AppError("Manm sa a inaktif.");
+    if (account.user.role !== "MEMBER") throw new AppError("Kont sa a pa ka fè aksyon.");
 
     for (let i = 0; i < weeks; i++) {
+      const monday = addDays(firstMonday, i * 7);
       await tx.transaction.create({
         data: {
           accountId: account.id,
           type: "SHARE",
-          amount: SHARE_AMOUNT,
-          weekOf: addDays(firstMonday, i * 7),
-          note: "Aksyon lendi",
+          amount,
+          weekOf: monday,
+          note: shareNote(monday),
           createdById: adminId,
         },
       });
@@ -54,14 +59,14 @@ async function applyShares(
 
     await tx.account.update({
       where: { id: account.id },
-      data: { shares: { increment: SHARE_AMOUNT * weeks } },
+      data: { shares: { increment: amount * weeks } },
     });
 
     await tx.auditLog.create({
       data: {
         actorId: adminId,
         action: "SHARE_RECORDED",
-        details: `${account.user.name} (${account.user.phone}): ${weeks} semèn × ${SHARE_AMOUNT} HTG`,
+        details: `${account.user.code ?? ""} ${account.user.name}: ${weeks} semèn × ${amount} HTG`,
       },
     });
   });
@@ -82,7 +87,9 @@ function refresh() {
   revalidatePath("/admin/transactions");
 }
 
-// Fòm anlè a (rattrapage / plizyè semèn)
+const amountError = `Montan an dwe ant ${SHARE_MIN.toLocaleString("fr-HT")} ak ${SHARE_MAX.toLocaleString("fr-HT")} HTG.`;
+
+// Fòm anlè a (montan + rattrapage / plizyè semèn)
 export async function recordShares(_prev: State, formData: FormData): Promise<State> {
   const admin = await requireAdmin();
 
@@ -90,9 +97,15 @@ export async function recordShares(_prev: State, formData: FormData): Promise<St
     userId: formData.get("userId"),
     weekOf: formData.get("weekOf"),
     weeks: formData.get("weeks"),
+    amount: formData.get("amount"),
   });
   if (!parsed.success) {
-    return { error: "Verifye manm nan, dat la ak kantite semèn yo (1 a 12)." };
+    const amountBad = parsed.error.issues.some((i) => i.path[0] === "amount");
+    return {
+      error: amountBad
+        ? amountError
+        : "Verifye manm nan, dat la ak kantite semèn yo (1 a 12).",
+    };
   }
 
   try {
@@ -100,7 +113,8 @@ export async function recordShares(_prev: State, formData: FormData): Promise<St
       admin.id,
       parsed.data.userId,
       new Date(parsed.data.weekOf + "T00:00:00Z"),
-      parsed.data.weeks
+      parsed.data.weeks,
+      parsed.data.amount
     );
   } catch (e) {
     return { error: toMessage(e) };
@@ -110,13 +124,19 @@ export async function recordShares(_prev: State, formData: FormData): Promise<St
   return { success: true };
 }
 
-// Bouton rapid nan tablo a (semèn aktyèl la)
+// Bouton rapid nan tablo a (semèn aktyèl la, ak montan manm nan)
 export async function quickShare(formData: FormData) {
   const admin = await requireAdmin();
   const userId = String(formData.get("userId"));
 
+  const amount = amountRule.safeParse(formData.get("amount"));
+  if (!amount.success) {
+    console.error(amountError);
+    return;
+  }
+
   try {
-    await applyShares(admin.id, userId, mondayOf(todayHT()), 1);
+    await applyShares(admin.id, userId, mondayOf(todayHT()), 1, amount.data);
   } catch (e) {
     console.error(toMessage(e));
   }

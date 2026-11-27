@@ -50,7 +50,9 @@ const initialsOf = (name: string) =>
     .toUpperCase();
 
 const isExpense = (type: string) =>
-  type === "WITHDRAWAL" || type === "LOAN_REPAYMENT";
+  type === "WITHDRAWAL" ||
+  type === "LOAN_REPAYMENT" ||
+  type === "FEE_PAID";
 
 function StatCard({
   label,
@@ -93,13 +95,9 @@ export default async function AdminTransactionsPage() {
 
   const [members, transactions] = await Promise.all([
     db.user.findMany({
-      where: { status: "ACTIVE" },
+      where: { OR: [{ status: "ACTIVE" }, { role: "TEAM" }] },
       orderBy: { name: "asc" },
-      select: {
-        id: true,
-        name: true,
-        phone: true,
-      },
+      select: { id: true, code: true, name: true, phone: true, role: true },
     }),
 
     db.transaction.findMany({
@@ -275,7 +273,15 @@ export default async function AdminTransactionsPage() {
           </h2>
         </div>
 
-        <TransactionForm members={members} />
+        <TransactionForm
+          members={members.map((m) => ({
+            id: m.id,
+            code: m.code,
+            name: m.name,
+            phone: m.phone,
+            isTeam: m.role === "TEAM",
+          }))}
+        />
       </section>
 
       {/* Transaction history */}

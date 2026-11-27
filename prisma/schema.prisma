@@ -28,11 +28,18 @@ enum TransactionType {
   DIVIDEND
   LOAN_DISBURSEMENT
   LOAN_REPAYMENT
+  FEE_PAID
+  TEAM_INCOME
 }
 
-enum CycleStatus {
-  OPEN
-  CLOSED
+enum FeeKind {
+  MEMBERSHIP
+  LATE_MEETING
+  PROXY_SHARE
+  MISSED_SHARE
+  INSTALLMENT
+  LOAN_PENALTY
+  LOAN_INTEREST
 }
 
 enum LoanStatus {
@@ -42,6 +49,12 @@ enum LoanStatus {
   ACTIVE
   PAID
   LATE
+  RENEWED
+}
+
+enum CycleStatus {
+  OPEN
+  CLOSED
 }
 
 model User {
@@ -75,6 +88,7 @@ model Transaction {
   type        TransactionType
   amount      Decimal         @db.Decimal(14, 2)
   note        String?
+  feeKind FeeKind?
   weekOf      DateTime?       @db.Date
   createdById String?
   createdAt   DateTime        @default(now())
@@ -100,6 +114,10 @@ model Loan {
   createdAt    DateTime      @default(now())
   user         User          @relation(fields: [userId], references: [id])
   payments     LoanPayment[]
+  renewalCount Int     @default(0)
+  parentLoanId String? @unique
+  parent       Loan?   @relation("Renewal", fields: [parentLoanId], references: [id])
+  renewedTo    Loan?   @relation("Renewal")
 
   @@index([userId, status])
 }
@@ -126,6 +144,7 @@ model LoanPayout {
   teamShare     Decimal  @db.Decimal(14, 2)
   poolShare     Decimal  @db.Decimal(14, 2)
   createdAt     DateTime @default(now())
+  penalty Decimal @default(0) @db.Decimal(14, 2)
   loan          Loan     @relation(fields: [loanId], references: [id])
   cycle         Cycle    @relation(fields: [cycleId], references: [id])
 }

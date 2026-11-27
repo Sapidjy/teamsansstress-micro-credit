@@ -2,63 +2,136 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { db } from "../../../src/lib/db";
-import { requireAdmin } from "../../../src/lib/auth";
-import { LOAN_TERMS, maxLoan, MIN_LOAN } from "../../../src/lib/loan";
-import { fromCents, interestCents, money, splitInterest, toCents, ZERO } from "../../../src/lib/cycle";
-import { Prisma } from "../../../generated/prisma/client";
-import { getSession } from "@/lib/session";
+import { db } from "@/lib/db";
+import { requireAdmin } from "@/lib/auth";
+import { LOAN_TERMS, MAX_RENEWALS, RENEWAL_NEXT, maxLoan, type TermDays } from "@/lib/loan";
+import { INSTALLMENT_FEE } from "@/lib/fees";
+import { loanDue } from "@/lib/loan-calc";
+import { money, splitInterest, toCents, ZERO } from "@/lib/cycle";
 
 type State = { error?: string; success?: boolean } | undefined;
 
 class AppError extends Error {}
 
-const GENERIC_ERROR = "Yon erè rive. Anyen pa chanje. Eseye ankò.";
+const DAY = 24 * 60 * 60 * 1000;
 
-const schema = z.object({
-  amount: z.string().trim().regex(/^\d{1,12}$/),
-  termDays: z.coerce.number().refine((d) => d in LOAN_TERMS),
-  reason: z.string().trim().min(3).max(300),
-});
+type Client = Pick<typeof db, "loan" | "loanPayout" | "loanPayment" | "account" | "transaction">;
 
 function refresh() {
   revalidatePath("/admin");
   revalidatePath("/admin/loans");
   revalidatePath("/admin/members");
   revalidatePath("/admin/transactions");
+  revalidatePath("/admin/fees");
   revalidatePath("/admin/cycle");
-  revalidatePath("/dashboard");
-  revalidatePath("/pre");
+  revalidatePath("/loans");
 }
 
-// Tranzaksyon Serializable ak retry si gen konfli (P2034)
-// Tranzaksyon Serializable ak retry si gen konfli (P2034)
-async function serializable<T>(
-  fn: (tx: Prisma.TransactionClient) => Promise<T>
-): Promise<T> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      return await db.$transaction(fn, { isolationLevel: "Serializable" });
-    } catch (e) {
-      if ((e as { code?: string })?.code === "P2034") {
-        lastError = e;
-        continue;
-      }
-      throw e;
-    }
+// ---------- Èd: frè vèsman 25 HTG ----------
+async function chargeInstallmentFee(
+  tx: Client,
+  p: {
+    memberAccountId: string;
+    teamAccountId: string;
+    adminId: string;
+    label: string;
+    source: "CASH" | "BALANCE";
   }
-  throw lastError;
+) {
+  await tx.transaction.create({
+    data: {
+      accountId: p.memberAccountId,
+      type: "FEE_PAID",
+      feeKind: "INSTALLMENT",
+      amount: INSTALLMENT_FEE,
+      note: `Vèsman sou pre (${p.source === "CASH" ? "kach" : "soti nan balans"})`,
+      createdById: p.adminId,
+    },
+  });
+  await tx.account.update({
+    where: { id: p.teamAccountId },
+    data: { balance: { increment: INSTALLMENT_FEE } },
+  });
+  await tx.transaction.create({
+    data: {
+      accountId: p.teamAccountId,
+      type: "TEAM_INCOME",
+      feeKind: "INSTALLMENT",
+      amount: INSTALLMENT_FEE,
+      note: `Vèsman sou pre · ${p.label}`,
+      createdById: p.adminId,
+    },
+  });
 }
 
-// APWOUVE: lajan an antre sou balans manm nan, pre a vin ACTIVE
-export async function approveLoan(_prev: State, formData: FormData): Promise<State> {
+// ---------- Èd: divize enterè a (50/25/25) + penalite 100% ekip ----------
+async function recordPayout(
+  tx: Client,
+  p: {
+    loanId: string;
+    cycleId: string;
+    interest: bigint;
+    penalty: bigint;
+    teamAccountId: string;
+    adminId: string;
+    label: string;
+  }
+) {
+  const split = splitInterest(p.interest);
+
+  await tx.loanPayout.create({
+    data: {
+      loanId: p.loanId,
+      cycleId: p.cycleId,
+      interest: money(p.interest),
+      borrowerShare: money(split.borrower),
+      teamShare: money(split.team),
+      poolShare: money(split.pool),
+      penalty: money(p.penalty),
+    },
+  });
+
+  const teamTotal = split.team + p.penalty;
+  if (teamTotal <= ZERO) return;
+
+  await tx.account.update({
+    where: { id: p.teamAccountId },
+    data: { balance: { increment: money(teamTotal) } },
+  });
+
+  if (split.team > ZERO) {
+    await tx.transaction.create({
+      data: {
+        accountId: p.teamAccountId,
+        type: "TEAM_INCOME",
+        feeKind: "LOAN_INTEREST",
+        amount: money(split.team),
+        note: `Pati ekip la sou enterè (25%) · ${p.label}`,
+        createdById: p.adminId,
+      },
+    });
+  }
+  if (p.penalty > ZERO) {
+    await tx.transaction.create({
+      data: {
+        accountId: p.teamAccountId,
+        type: "TEAM_INCOME",
+        feeKind: "LOAN_PENALTY",
+        amount: money(p.penalty),
+        note: `Penalite sou enterè · ${p.label}`,
+        createdById: p.adminId,
+      },
+    });
+  }
+}
+
+// ---------- APWOUVE ----------
+export async function approveLoan(formData: FormData) {
   const admin = await requireAdmin();
-  const id = String(formData.get("id") ?? "").trim();
-  if (!id) return { error: "Pre a pa idantifye." };
+  const id = String(formData.get("id"));
 
   try {
-    await serializable(async (tx) => {
+    await db.$transaction(async (tx) => {
       const loan = await tx.loan.findUnique({
         where: { id },
         include: { user: true, cycle: true },
@@ -80,7 +153,7 @@ export async function approveLoan(_prev: State, formData: FormData): Promise<Sta
         data: {
           status: "ACTIVE",
           approvedAt: new Date(),
-          dueDate: new Date(Date.now() + loan.termDays * 24 * 60 * 60 * 1000),
+          dueDate: new Date(Date.now() + loan.termDays * DAY),
         },
       });
       if (claimed.count === 0) throw new AppError("Pre a deja trete.");
@@ -107,62 +180,41 @@ export async function approveLoan(_prev: State, formData: FormData): Promise<Sta
       });
     });
   } catch (e) {
-    if (e instanceof AppError) return { error: e.message };
-    console.error(e);
-    return { error: GENERIC_ERROR };
+    if (!(e instanceof AppError)) console.error(e);
   }
 
   refresh();
-  return { success: true };
 }
 
-export async function rejectLoan(_prev: State, formData: FormData): Promise<State> {
+export async function rejectLoan(formData: FormData) {
   const admin = await requireAdmin();
-  const id = String(formData.get("id") ?? "").trim();
-  if (!id) return { error: "Pre a pa idantifye." };
+  const id = String(formData.get("id"));
 
-  try {
-    await db.$transaction(async (tx) => {
-      const loan = await tx.loan.findUnique({ where: { id }, include: { user: true } });
-      if (!loan) throw new AppError("Pre a pa egziste.");
-
-      const r = await tx.loan.updateMany({
-        where: { id, status: "PENDING" },
-        data: { status: "REJECTED" },
-      });
-      if (r.count === 0) throw new AppError("Pre a pa an atant.");
-
-      await tx.auditLog.create({
-        data: {
-          actorId: admin.id,
-          action: "LOAN_REJECTED",
-          details: `${loan.user.name}: ${loan.amount} HTG (pre ${id})`,
-        },
-      });
+  const r = await db.loan.updateMany({
+    where: { id, status: "PENDING" },
+    data: { status: "REJECTED" },
+  });
+  if (r.count > 0) {
+    await db.auditLog.create({
+      data: { actorId: admin.id, action: "LOAN_REJECTED", details: `Pre ${id}` },
     });
-  } catch (e) {
-    if (e instanceof AppError) return { error: e.message };
-    console.error(e);
-    return { error: GENERIC_ERROR };
   }
-
   refresh();
-  return { success: true };
 }
 
+// ---------- REMBOURSMAN ----------
 const repaySchema = z.object({
   loanId: z.string().min(1),
   amount: z.string().regex(/^\d{1,12}(\.\d{1,2})?$/),
   source: z.enum(["BALANCE", "CASH"]),
 });
 
-// REMBOURSMAN: si pre a peye nèt, enterè a divize 50/25/25 otomatikman
 export async function recordRepayment(_prev: State, formData: FormData): Promise<State> {
   const admin = await requireAdmin();
 
   const parsed = repaySchema.safeParse({
     loanId: formData.get("loanId"),
-    amount: String(formData.get("amount") ?? "").trim().replace(",", "."),
+    amount: String(formData.get("amount") ?? "").replace(",", "."),
     source: formData.get("source"),
   });
   if (!parsed.success || toCents(parsed.data.amount) <= ZERO) {
@@ -173,7 +225,13 @@ export async function recordRepayment(_prev: State, formData: FormData): Promise
   const amountCents = toCents(amount);
 
   try {
-    await serializable(async (tx) => {
+    await db.$transaction(async (tx) => {
+      const team = await tx.user.findFirst({
+        where: { role: "TEAM" },
+        include: { account: true },
+      });
+      if (!team?.account) throw new AppError("Kont ekip la (TSS-MK) pa egziste.");
+
       const loan = await tx.loan.findUnique({
         where: { id: loanId },
         include: { payments: true, user: true },
@@ -184,27 +242,32 @@ export async function recordRepayment(_prev: State, formData: FormData): Promise
       }
       if (!loan.cycleId) throw new AppError("Pre sa a pa gen sik.");
 
-      const interest = interestCents(loan.amount, loan.interestRate);
-      const totalCents = toCents(loan.amount) + interest;
-      const paidCents = loan.payments.reduce((s, p) => s + toCents(p.amount), ZERO);
-      const remaining = totalCents - paidCents;
-
-      if (amountCents > remaining) {
-        throw new AppError(`Montan an depase sa ki rete a (${money(remaining)} HTG).`);
+      const due = loanDue(loan, loan.payments);
+      if (amountCents > due.remaining) {
+        throw new AppError(`Montan an depase sa ki rete a (${money(due.remaining)} HTG).`);
       }
 
       const account = await tx.account.findUnique({ where: { userId: loan.userId } });
       if (!account) throw new AppError("Kont lan pa egziste.");
 
+      const isFinal = amountCents === due.remaining;
+      // Pa gen frè si manm nan peye tout pre a yon sèl fwa
+      const feeCents = !isFinal || loan.payments.length > 0 ? toCents(INSTALLMENT_FEE) : ZERO;
+
       if (source === "BALANCE") {
+        const debit = money(amountCents + feeCents);
         const r = await tx.account.updateMany({
-          where: { id: account.id, balance: { gte: amount } },
-          data: { balance: { decrement: amount } },
+          where: { id: account.id, balance: { gte: debit } },
+          data: { balance: { decrement: debit } },
         });
         if (r.count === 0) {
-          throw new AppError("Balans manm nan pa sifi. Fè yon depo dabò oswa chwazi 'Kach'.");
+          throw new AppError(
+            `Balans manm nan pa sifi (bezwen ${debit} HTG ak frè vèsman an). Fè yon depo dabò oswa chwazi 'Kach'.`
+          );
         }
       }
+
+      const label = `${loan.user.code ?? ""} ${loan.user.name}`.trim();
 
       await tx.loanPayment.create({ data: { loanId: loan.id, amount } });
       await tx.transaction.create({
@@ -217,24 +280,32 @@ export async function recordRepayment(_prev: State, formData: FormData): Promise
         },
       });
 
-      if (amountCents === remaining) {
-        const split = splitInterest(interest);
+      if (feeCents > ZERO) {
+        await chargeInstallmentFee(tx, {
+          memberAccountId: account.id,
+          teamAccountId: team.account.id,
+          adminId: admin.id,
+          label,
+          source,
+        });
+      }
+
+      if (isFinal) {
         await tx.loan.update({ where: { id: loan.id }, data: { status: "PAID" } });
-        await tx.loanPayout.create({
-          data: {
-            loanId: loan.id,
-            cycleId: loan.cycleId,
-            interest: money(interest),
-            borrowerShare: money(split.borrower),
-            teamShare: money(split.team),
-            poolShare: money(split.pool),
-          },
+        await recordPayout(tx, {
+          loanId: loan.id,
+          cycleId: loan.cycleId,
+          interest: due.interest,
+          penalty: due.penalty,
+          teamAccountId: team.account.id,
+          adminId: admin.id,
+          label,
         });
         await tx.auditLog.create({
           data: {
             actorId: admin.id,
             action: "LOAN_PAID",
-            details: `${loan.user.name}: enterè ${money(interest)} HTG (50/25/25)`,
+            details: `${label}: enterè ${money(due.interest)} HTG (50/25/25), penalite ${money(due.penalty)} HTG`,
           },
         });
       } else {
@@ -242,7 +313,7 @@ export async function recordRepayment(_prev: State, formData: FormData): Promise
           data: {
             actorId: admin.id,
             action: "LOAN_REPAYMENT",
-            details: `${loan.user.name}: ${amount} HTG, rete ${fromCents(remaining - amountCents)} HTG`,
+            details: `${label}: ${amount} HTG, rete ${money(due.remaining - amountCents)} HTG`,
           },
         });
       }
@@ -250,68 +321,148 @@ export async function recordRepayment(_prev: State, formData: FormData): Promise
   } catch (e) {
     if (e instanceof AppError) return { error: e.message };
     console.error(e);
-    return { error: GENERIC_ERROR };
+    return { error: "Yon erè rive. Anyen pa chanje. Eseye ankò." };
   }
 
   refresh();
   return { success: true };
 }
 
-export async function requestLoan(_prev: State, formData: FormData): Promise<State> {
-  const session = await getSession();
-  if (!session) return { error: "Ou dwe konekte." };
+// ---------- RENOUVÈLMAN ----------
+const renewSchema = z.object({
+  loanId: z.string().min(1),
+  source: z.enum(["BALANCE", "CASH"]),
+});
 
-  const parsed = schema.safeParse({
-    amount: formData.get("amount"),
-    termDays: formData.get("termDays"),
-    reason: formData.get("reason"),
+export async function renewLoan(_prev: State, formData: FormData): Promise<State> {
+  const admin = await requireAdmin();
+
+  const parsed = renewSchema.safeParse({
+    loanId: formData.get("loanId"),
+    source: formData.get("source"),
   });
-  if (!parsed.success) return { error: "Verifye montan an, dire a ak rezon an." };
+  if (!parsed.success) return { error: "Verifye fason peman an." };
 
-  const amount = Number(parsed.data.amount);
-  const termDays = parsed.data.termDays;
-  const rate = LOAN_TERMS[termDays as keyof typeof LOAN_TERMS].rate;
+  const { loanId, source } = parsed.data;
 
   try {
-    const [user, cycle] = await Promise.all([
-      db.user.findUnique({
-        where: { id: session.userId },
+    await db.$transaction(async (tx) => {
+      const team = await tx.user.findFirst({
+        where: { role: "TEAM" },
         include: { account: true },
-      }),
-      db.cycle.findFirst({ where: { status: "OPEN" } }),
-    ]);
+      });
+      if (!team?.account) throw new AppError("Kont ekip la (TSS-MK) pa egziste.");
 
-    if (!user || user.status !== "ACTIVE") return { error: "Kont ou a inaktif." };
-    if (!user.account) return { error: "Kont lan pa egziste." };
-    if (!cycle) return { error: "Pa gen sik ouvri pou kounye a." };
+      const loan = await tx.loan.findUnique({
+        where: { id: loanId },
+        include: { payments: true, user: true, cycle: true },
+      });
+      if (!loan) throw new AppError("Pre a pa egziste.");
+      if (loan.status !== "ACTIVE" && loan.status !== "LATE") {
+        throw new AppError("Pre sa a pa ouvri pou renouvèlman.");
+      }
+      if (!loan.cycleId || loan.cycle?.status !== "OPEN") {
+        throw new AppError("Sik la pa ouvri.");
+      }
+      if (loan.renewalCount >= MAX_RENEWALS) {
+        throw new AppError(`Pre sa a deja renouvle ${MAX_RENEWALS} fwa. Manm nan dwe ranbouse l.`);
+      }
+      if (loan.payments.length > 0) {
+        throw new AppError("Pre sa a gen deja peman. Ranbouse l nòmalman.");
+      }
 
-    const max = maxLoan(Number(user.account.shares));
-    if (amount < MIN_LOAN) return { error: `Minimòm se ${MIN_LOAN} HTG.` };
-    if (amount > max) return { error: "Montan an depase 2 fwa aksyon ou." };
+      const nextTerm = RENEWAL_NEXT[loan.termDays];
+      if (!nextTerm) throw new AppError("Pa gen dire renouvèlman pou pre sa a.");
+      const nextRate = LOAN_TERMS[nextTerm as TermDays].rate;
 
-    const existing = await db.loan.count({
-      where: { userId: user.id, status: { in: ["PENDING", "ACTIVE", "LATE"] } },
-    });
-    if (existing > 0) return { error: "Ou deja gen yon pre ki an kou oswa an atant." };
+      const account = await tx.account.findUnique({ where: { userId: loan.userId } });
+      if (!account) throw new AppError("Kont lan pa egziste.");
 
-    await db.loan.create({
-      data: {
-        userId: user.id,
-        cycleId: cycle.id,
-        amount,
-        termDays,
-        interestRate: rate,
-        reason: parsed.data.reason,
-        status: "PENDING",
-      },
+      const due = loanDue(loan, loan.payments);
+      const payCents = due.interest + due.penalty; // enterè + penalite, kapital la rete
+      const feeCents = toCents(INSTALLMENT_FEE);
+
+      // Pran pre a anvan (anpeche de renouvèlman alafwa)
+      const claimed = await tx.loan.updateMany({
+        where: { id: loan.id, status: { in: ["ACTIVE", "LATE"] } },
+        data: { status: "RENEWED" },
+      });
+      if (claimed.count === 0) throw new AppError("Pre a deja trete.");
+
+      if (source === "BALANCE") {
+        const debit = money(payCents + feeCents);
+        const r = await tx.account.updateMany({
+          where: { id: account.id, balance: { gte: debit } },
+          data: { balance: { decrement: debit } },
+        });
+        if (r.count === 0) {
+          throw new AppError(
+            `Balans manm nan pa sifi (bezwen ${debit} HTG). Fè yon depo dabò oswa chwazi 'Kach'.`
+          );
+        }
+      }
+
+      const label = `${loan.user.code ?? ""} ${loan.user.name}`.trim();
+
+      await tx.loanPayment.create({ data: { loanId: loan.id, amount: money(payCents) } });
+      await tx.transaction.create({
+        data: {
+          accountId: account.id,
+          type: "LOAN_REPAYMENT",
+          amount: money(payCents),
+          note: `Renouvèlman: enterè sèlman${due.weeks > 0 ? ` + penalite (${due.weeks} lendi)` : ""} (${source === "CASH" ? "kach" : "soti nan balans"})`,
+          createdById: admin.id,
+        },
+      });
+
+      await chargeInstallmentFee(tx, {
+        memberAccountId: account.id,
+        teamAccountId: team.account.id,
+        adminId: admin.id,
+        label,
+        source,
+      });
+
+      await recordPayout(tx, {
+        loanId: loan.id,
+        cycleId: loan.cycleId,
+        interest: due.interest,
+        penalty: due.penalty,
+        teamAccountId: team.account.id,
+        adminId: admin.id,
+        label,
+      });
+
+      const next = await tx.loan.create({
+        data: {
+          userId: loan.userId,
+          amount: loan.amount,
+          termDays: nextTerm,
+          interestRate: nextRate,
+          reason: "Renouvèlman",
+          status: "ACTIVE",
+          approvedAt: new Date(),
+          dueDate: new Date(Date.now() + nextTerm * DAY),
+          cycleId: loan.cycleId,
+          renewalCount: loan.renewalCount + 1,
+          parentLoanId: loan.id,
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          actorId: admin.id,
+          action: "LOAN_RENEWED",
+          details: `${label}: ${loan.amount} HTG, ${loan.termDays}→${nextTerm} jou (${nextRate}%), renouvèlman ${next.renewalCount}/${MAX_RENEWALS}, peye ${money(payCents)} HTG`,
+        },
+      });
     });
   } catch (e) {
+    if (e instanceof AppError) return { error: e.message };
     console.error(e);
-    return { error: "Yon erè rive. Eseye ankò." };
+    return { error: "Yon erè rive. Anyen pa chanje. Eseye ankò." };
   }
 
-  revalidatePath("/pre");
-  revalidatePath("/admin/loans");
-  revalidatePath("/admin");
+  refresh();
   return { success: true };
 }

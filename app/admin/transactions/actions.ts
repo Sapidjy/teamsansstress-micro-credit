@@ -41,7 +41,11 @@ export async function createTransaction(
         include: { user: true },
       });
       if (!account) throw new AppError("Kont lan pa egziste.");
-      if (account.user.status !== "ACTIVE") {
+      const isTeam = account.user.role === "TEAM";
+      if (isTeam && type !== "INITIAL_DEPOSIT") {
+        throw new AppError("Kont ekip la ka resevwa sèlman depo inisyal.");
+      }
+      if (!isTeam && account.user.status !== "ACTIVE") {
         throw new AppError("Manm sa a inaktif.");
       }
 
