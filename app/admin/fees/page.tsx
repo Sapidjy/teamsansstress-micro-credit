@@ -15,7 +15,7 @@ export default async function FeesPage() {
   const [team, members, totals, recent] = await Promise.all([
     db.user.findFirst({ where: { role: "TEAM" }, include: { account: true } }),
     db.user.findMany({
-      where: { role: "MEMBER", status: "ACTIVE" },
+      where: { role: { not: "TEAM" }, status: "ACTIVE" },
       orderBy: { name: "asc" },
       include: { account: true },
     }),
