@@ -21,6 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { HandCoins } from "lucide-react";
 
 export const instant = false;
 
@@ -57,7 +58,25 @@ export default async function AdminLoansPage() {
     <div className="space-y-4">
       <h1 className="text-xl font-bold">Jesyon pre</h1>
 
-      {loans.length === 0 && <p className="text-sm text-muted-foreground">Pa gen pre ankò.</p>}
+      {loans.length === 0 && (
+        <Card className="overflow-hidden border-dashed shadow-sm">
+          <CardContent className="flex flex-col items-center justify-center px-6 py-14 text-center">
+            <div className="mb-5 flex size-20 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+              <HandCoins className="size-10" strokeWidth={1.5} />
+            </div>
+
+            <div className="max-w-sm space-y-2">
+              <h3 className="text-lg font-semibold tracking-tight">
+                Ou poko gen okenn prè
+              </h3>
+
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                Tout demann prè ou yo ap parèt isit la. Ou pral kapab konsilte detay yo, swiv estati demann ou yo ak kontwole ranbousman ou yo nan menm espas sa a.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {loans.map((l) => {
         const due = loanDue(l, l.payments);
