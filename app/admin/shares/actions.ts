@@ -41,7 +41,7 @@ async function applyShares(
     });
     if (!account) throw new AppError("Kont lan pa egziste.");
     if (account.user.status !== "ACTIVE") throw new AppError("Manm sa a inaktif.");
-    if (account.user.role !== "MEMBER") throw new AppError("Kont sa a pa ka fè aksyon.");
+    if (account.user.role === "TEAM") throw new AppError("Kont sa a pa ka fè aksyon.");
 
     for (let i = 0; i < weeks; i++) {
       const monday = addDays(firstMonday, i * 7);
